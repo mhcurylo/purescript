@@ -638,17 +638,22 @@ codeGen optionsMainModule optionsNamespace ms outFileOpt = (fmap sourceMapping o
   wrap :: String -> [JSStatement] -> [JSStatement]
   wrap mn ds =
     [
-    JSMethodCall (JSExpressionParen lf (JSFunctionExpression JSNoAnnot JSIdentNone JSNoAnnot
-                                                (JSLOne (JSIdentName JSNoAnnot "exports")) JSNoAnnot
-                                                (JSBlock sp (lfHead ds) lf)) -- \n not quite in right place
+    JSMethodCall (JSExpressionParen lf (JSFunctionExpression JSNoAnnot JSIdentNone JSNoAnnot (JSLOne (JSIdentName JSNoAnnot optionsNamespace)) JSNoAnnot
+                                                (JSBlock sp (addModuleExports ds) lf)) -- \n not quite in right place
                                     JSNoAnnot)
                   JSNoAnnot
-                  (JSLOne (JSAssignExpression (moduleReference JSNoAnnot mn) (JSAssign sp)
-                            (JSExpressionBinary (moduleReference sp mn) (JSBinOpOr sp) (emptyObj sp))))
+                  (JSLOne (JSIdentifier JSNoAnnot optionsNamespace))
+                  --(JSLOne (JSAssignExpression (moduleReference JSNoAnnot mn) (JSAssign sp)
+                  --          (JSExpressionBinary (moduleReference sp mn) (JSBinOpOr sp) (emptyObj sp))))
                   JSNoAnnot
                   (JSSemi JSNoAnnot)
     ]
     where
+      addModuleExports :: [JSStatement] -> [JSStatement]
+      addModuleExports [] = lfHead [moduleExports] 
+      addModuleExports (x:xs) = lfHead (x : moduleExports : xs)
+      moduleExports = JSVariable lfsp (JSLOne $ JSVarInitExpression (JSIdentifier sp "exports") (JSVarInit sp $ (JSAssignExpression (moduleReference sp mn) (JSAssign sp) (JSExpressionBinary (moduleReference sp mn) (JSBinOpOr sp) (emptyObj sp))))) (JSSemi JSNoAnnot)
+
       lfHead (h:t) = addAnn (WhiteSpace tokenPosnEmpty "\n  ") h : t
       lfHead x = x
 
