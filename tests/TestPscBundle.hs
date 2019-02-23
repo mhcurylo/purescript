@@ -41,7 +41,7 @@ import Test.Tasty
 import Test.Tasty.Hspec
 
 main :: IO TestTree
-main = testSpec "compiler" spec
+main = testSpec "psc-bundle" spec
 
 spec :: Spec
 spec = do
@@ -67,7 +67,7 @@ spec = do
   context "Bundle examples" $
     forM_ bundleTestCases $ \testPurs ->
       it ("'" <> takeFileName (getTestMain testPurs) <> "' should compile and run without error") $
-        assertCompiles supportModules supportExterns supportForeigns testPurs outputFile
+        assertBundles supportModules supportExterns supportForeigns testPurs outputFile
   where
 
   -- A glob for all purs and js files within a test directory
@@ -178,86 +178,32 @@ checkMain ms =
   unless (any ((== P.moduleNameFromString "Main") . P.getModuleName) ms)
     (fail "Main module missing")
 
-checkShouldFailWith :: [String] -> P.MultipleErrors -> Maybe String
-checkShouldFailWith expected errs =
-  let actual = map P.errorCode $ P.runMultipleErrors errs
-  in if sort expected == sort (map T.unpack actual)
-    then checkPositioned errs
-    else Just $ "Expected these errors: " ++ show expected ++ ", but got these: "
-      ++ show actual ++ ", full error messages: \n"
-      ++ unlines (map (P.renderBox . P.prettyPrintSingleError P.defaultPPEOptions) (P.runMultipleErrors errs))
-
-checkPositioned :: P.MultipleErrors -> Maybe String
-checkPositioned errs =
-  case mapMaybe guardSpans (P.runMultipleErrors errs) of
-    [] ->
-      Nothing
-    errs' ->
-      Just
-        $ "Found errors with missing source spans:\n"
-        ++ unlines (map (P.renderBox . P.prettyPrintSingleError P.defaultPPEOptions) errs')
-  where
-  guardSpans :: P.ErrorMessage -> Maybe P.ErrorMessage
-  guardSpans err = case P.errorSpan err of
-    Just ss | any (not . isNonsenseSpan) ss -> Nothing
-    _ -> Just err
-
-  isNonsenseSpan :: P.SourceSpan -> Bool
-  isNonsenseSpan (P.SourceSpan spanName spanStart spanEnd) =
-    spanName == "" || spanName == "<module>" || (spanStart == emptyPos && spanEnd == emptyPos)
-
-  emptyPos :: P.SourcePos
-  emptyPos = P.SourcePos 0 0
-
--- bundleSM :: (MonadError ErrorMessage m)
---        => [(ModuleIdentifier, Maybe FilePath, String)] -- ^ The input modules.  Each module should be javascript rendered from the compiler.
---        -> [ModuleIdentifier] -- ^ Entry points.  These module identifiers are used as the roots for dead-code elimination
---        -> Maybe String -- ^ An optional main module.
---        -> String -- ^ The namespace (e.g. PS).
---        -> Maybe FilePath -- ^ The output file name (if there is one - in which case generate source map)
- 
--- app :: (MonadError ErrorMessage m, MonadIO m) => String -> String -> m (Maybe SourceMapping, String)
--- app modulesDir entryPoint = do
---   inputFiles <- concat <$> mapM (liftIO . glob) compiledInputFiles
---   when (null inputFiles) . liftIO $ do
---     hPutStrLn stderr "purs bundle: No input files."
---     exitFailure
-
---   input <- for inputFiles $ \filename -> do
---     js <- liftIO (readUTF8File filename)
---     mid <- guessModuleIdentifier filename
---     length js `seq` return (mid, Just filename, js)                                            -- evaluate readFile till EOF before returning, not to exhaust file handles
-
---   let entryIds = map (`ModuleIdentifier` Regular) "Main"
-
---   bundleSM input entryIds optionsMainModule Nothing outFile
-
-assertCompiles
+assertBundles
   :: [P.Module]
   -> [P.ExternsFile]
   -> M.Map P.ModuleName FilePath
   -> [FilePath]
   -> Handle
   -> Expectation
-assertCompiles supportModules supportExterns supportForeigns inputFiles outputFile =
+assertBundles supportModules supportExterns supportForeigns inputFiles outputFile =
   assert supportModules supportExterns supportForeigns inputFiles checkMain $ \e ->
     case e of
       Left errs -> return . Just . P.prettyPrintMultipleErrors P.defaultPPEOptions $ errs
       Right _ -> do
         process <- findNodeProcess
         -- Mateuszu! Tutaj zrob. Trzeba to zbundlowac zamiast tworzyc Main.main()
-
-        let entryPoint = modulesDir </> "index.js"
         --app modulesDir entryPoint
+        jsFiles <- Glob.globDir1 (Glob.compile "**/*.js") modulesDir
+        let entryPoint = modulesDir </> "index.js"
         let entryModule = map (`ModuleIdentifier` Regular) ["Main"] 
-        input <- forM [modulesDir </> "Main/index.js"] $ \filename -> do
+        input <- forM jsFiles $ \filename -> do
           js <- readUTF8File filename
           mid <- case guessModuleIdentifier filename of
             Right i -> return i
-          putStrLn $ show (mid, Just filename, js)
           length js `seq` return (mid, Just filename, js) 
         case bundleSM input entryModule (Just $ "Main") "PS" (Just entryPoint) of
-          Right ss -> do
+          Right (_, js) -> do
+            writeUTF8File entryPoint js
             --writeFile entryPoint "require('Main').main()"
             result <- traverse (\node -> readProcessWithExitCode node [entryPoint] "") process
             hPutStrLn outputFile $ "\n" <> takeFileName (last inputFiles) <> ":"
@@ -273,7 +219,6 @@ assertCompiles supportModules supportExterns supportForeigns inputFiles outputFi
           Left ss -> do
             putStrLn $ show ss
             return $ Just $ show ss
-
 
 
 logpath :: FilePath

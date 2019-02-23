@@ -46,14 +46,14 @@ main = do
     testGroup
       "Tests"
       [ 
---        compilerTests
---      , psciTests
-       pscBundleTests
---      , ideTests
---      , coreFnTests
---      , docsTests
---      , publishTests
---      , hierarchyTests
+        compilerTests
+      , psciTests
+      , pscBundleTests
+      , ideTests
+      , coreFnTests
+      , docsTests
+      , publishTests
+      , hierarchyTests
       ]
 
   where
